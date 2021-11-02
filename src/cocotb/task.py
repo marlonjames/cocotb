@@ -2,6 +2,7 @@
 # Licensed under the Revised BSD License, see LICENSE for details.
 # SPDX-License-Identifier: BSD-3-Clause
 import collections.abc
+import contextvars
 import inspect
 import logging
 import os
@@ -60,6 +61,7 @@ class Task(typing.Coroutine[typing.Any, typing.Any, T]):
         self._outcome: _outcomes.Outcome = None
         self._trigger: typing.Optional[cocotb.triggers.Trigger] = None
         self._cancelled: typing.Optional[CancelledError] = None
+        self._callbacks: list[typing.Tuple[typing.Callable, contextvars.Context]] = []
 
         self._task_id = self._id_count
         type(self)._id_count += 1
@@ -182,6 +184,30 @@ class Task(typing.Coroutine[typing.Any, typing.Any, T]):
             stacklevel=2,
         )
         self.kill()
+
+    def _add_done_callback(self, fn, *, context=None):
+        """Add a callback to be run when the task finishes.
+
+        The callback is called with a single argument - the :class:`Task` object. If
+        the task is already done when this is called, the callback is called immediately.
+        """
+        if context is None:
+            context = contextvars.copy_context()
+        if self._finished:
+            context.run(fn, self)
+        else:
+            self._callbacks.append((fn, context))
+
+    def _remove_done_callback(self, fn):
+        """Remove all instances of a callback from the "call when done" list.
+
+        Returns the number of callbacks removed.
+        """
+        filtered_callbacks = [(f, ctx) for (f, ctx) in self._callbacks if f != fn]
+        removed_count = len(self._callbacks) - len(filtered_callbacks)
+        if removed_count:
+            self._callbacks[:] = filtered_callbacks
+        return removed_count
 
     def cancelled(self) -> bool:
         """Return ``True`` if the Task was cancelled."""
