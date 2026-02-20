@@ -24,6 +24,9 @@
 
 #define MODULE_NAME "simulator"
 
+// Typed nullptr for object creation
+gpi_cb_hdl null_cb_hdl = nullptr;
+
 // callback user data
 struct PythonCallback {
     PythonCallback(PyObject *func, PyObject *_args, PyObject *_kwargs)
@@ -51,6 +54,7 @@ namespace {
 template <typename gpi_hdl_type>
 struct gpi_hdl_Object {
     PyObject_HEAD gpi_hdl_type hdl;
+    gpi_hdl new_hdl;
 
     // The python type object, in a place that is easy to retrieve in templates
     static PyTypeObject py_type;
@@ -79,8 +83,8 @@ static Py_hash_t gpi_hdl_hash(gpi_hdl_Object<gpi_hdl_type> *self) {
  * pointer is NULL.
  */
 template <typename gpi_hdl_type>
-static PyObject *gpi_hdl_New(gpi_hdl_type hdl) {
-    if (hdl == NULL) {
+static PyObject *gpi_hdl_New(gpi_hdl_type hdl, gpi_hdl new_hdl) {
+    if (hdl == NULL && gpi_hdl_is_nil(new_hdl)) {
         Py_RETURN_NONE;
     }
     auto *obj = PyObject_New(gpi_hdl_Object<gpi_hdl_type>,
@@ -89,6 +93,7 @@ static PyObject *gpi_hdl_New(gpi_hdl_type hdl) {
         return NULL;
     }
     obj->hdl = hdl;
+    obj->new_hdl = new_hdl;
     return (PyObject *)obj;
 }
 
@@ -231,10 +236,10 @@ static PyObject *register_readonly_callback(PyObject *, PyObject *args) {
 
     PythonCallback *cb_data = new PythonCallback(function, fArgs, NULL);
 
-    gpi_cb_hdl hdl = gpi_register_readonly_callback(
+    gpi_hdl hdl = gpi_register_readonly_callback(
         (gpi_function_t)handle_gpi_callback, cb_data);
 
-    PyObject *rv = gpi_hdl_New(hdl);
+    PyObject *rv = gpi_hdl_New(null_cb_hdl, hdl);
 
     return rv;
 }
@@ -272,10 +277,10 @@ static PyObject *register_rwsynch_callback(PyObject *, PyObject *args) {
 
     PythonCallback *cb_data = new PythonCallback(function, fArgs, NULL);
 
-    gpi_cb_hdl hdl = gpi_register_readwrite_callback(
+    gpi_hdl hdl = gpi_register_readwrite_callback(
         (gpi_function_t)handle_gpi_callback, cb_data);
 
-    PyObject *rv = gpi_hdl_New(hdl);
+    PyObject *rv = gpi_hdl_New(null_cb_hdl, hdl);
 
     return rv;
 }
@@ -313,10 +318,10 @@ static PyObject *register_nextstep_callback(PyObject *, PyObject *args) {
 
     PythonCallback *cb_data = new PythonCallback(function, fArgs, NULL);
 
-    gpi_cb_hdl hdl = gpi_register_nexttime_callback(
+    gpi_hdl hdl = gpi_register_nexttime_callback(
         (gpi_function_t)handle_gpi_callback, cb_data);
 
-    PyObject *rv = gpi_hdl_New(hdl);
+    PyObject *rv = gpi_hdl_New(null_cb_hdl, hdl);
 
     return rv;
 }
@@ -373,11 +378,11 @@ static PyObject *register_timed_callback(PyObject *, PyObject *args) {
 
     PythonCallback *cb_data = new PythonCallback(function, fArgs, NULL);
 
-    gpi_cb_hdl hdl = gpi_register_timed_callback(
+    gpi_hdl hdl = gpi_register_timed_callback(
         (gpi_function_t)handle_gpi_callback, cb_data, time);
 
     // Check success
-    PyObject *rv = gpi_hdl_New(hdl);
+    PyObject *rv = gpi_hdl_New(null_cb_hdl, hdl);
 
     return rv;
 }
@@ -431,11 +436,11 @@ static PyObject *register_value_change_callback(
 
     PythonCallback *cb_data = new PythonCallback(function, fArgs, NULL);
 
-    gpi_cb_hdl hdl = gpi_register_value_change_callback(
+    gpi_hdl hdl = gpi_register_value_change_callback(
         (gpi_function_t)handle_gpi_callback, cb_data, sig_hdl, edge);
 
     // Check success
-    PyObject *rv = gpi_hdl_New(hdl);
+    PyObject *rv = gpi_hdl_New(null_cb_hdl, hdl);
 
     return rv;
 }
@@ -449,13 +454,13 @@ static PyObject *iterate(gpi_hdl_Object<gpi_sim_hdl> *self, PyObject *args) {
 
     gpi_iterator_hdl result = gpi_iterate(self->hdl, (gpi_iterator_sel)type);
 
-    return gpi_hdl_New(result);
+    return gpi_hdl_New(result, gpi_nil_hdl);
 }
 
 static PyObject *package_iterate(PyObject *, PyObject *) {
     gpi_iterator_hdl result = gpi_iterate(NULL, GPI_PACKAGE_SCOPES);
 
-    return gpi_hdl_New(result);
+    return gpi_hdl_New(result, gpi_nil_hdl);
 }
 
 static PyObject *iterator_next(gpi_hdl_Object<gpi_iterator_hdl> *self) {
@@ -467,7 +472,7 @@ static PyObject *iterator_next(gpi_hdl_Object<gpi_iterator_hdl> *self) {
         return NULL;
     }
 
-    return gpi_hdl_New(result);
+    return gpi_hdl_New(result, gpi_nil_hdl);
 }
 
 // Raise an exception on failure
@@ -598,7 +603,7 @@ static PyObject *get_handle_by_name(gpi_hdl_Object<gpi_sim_hdl> *self,
     gpi_sim_hdl result =
         gpi_get_handle_by_name(self->hdl, name, c_discovery_method);
 
-    return gpi_hdl_New(result);
+    return gpi_hdl_New(result, gpi_nil_hdl);
 }
 
 static PyObject *get_handle_by_index(gpi_hdl_Object<gpi_sim_hdl> *self,
@@ -611,7 +616,7 @@ static PyObject *get_handle_by_index(gpi_hdl_Object<gpi_sim_hdl> *self,
 
     gpi_sim_hdl result = gpi_get_handle_by_index(self->hdl, index);
 
-    return gpi_hdl_New(result);
+    return gpi_hdl_New(result, gpi_nil_hdl);
 }
 
 static PyObject *get_root_handle(PyObject *, PyObject *args) {
@@ -631,7 +636,7 @@ static PyObject *get_root_handle(PyObject *, PyObject *args) {
         Py_RETURN_NONE;
     }
 
-    return gpi_hdl_New(result);
+    return gpi_hdl_New(result, gpi_nil_hdl);
 }
 
 static PyObject *get_name_string(gpi_hdl_Object<gpi_sim_hdl> *self,
@@ -792,12 +797,16 @@ static PyObject *stop_simulator(PyObject *, PyObject *) {
 static PyObject *deregister(gpi_hdl_Object<gpi_cb_hdl> *self, PyObject *) {
     // cleanup uncalled callback
     void *cb_data;
-    gpi_get_cb_info(self->hdl, nullptr, &cb_data);
-    auto cb = static_cast<PythonCallback *>(cb_data);
-    delete cb;
+    int error = gpi_get_cb_info(self->new_hdl, nullptr, &cb_data);
+    if (!error) {
+        auto cb = static_cast<PythonCallback *>(cb_data);
+        delete cb;
+    }
 
     // deregister from interface
-    gpi_remove_cb(self->hdl);
+    gpi_remove_cb(self->new_hdl);
+
+    (void)self;
 
     Py_RETURN_NONE;
 }
@@ -859,7 +868,7 @@ class GpiClock {
 
   private:
     GpiObjHdl *clk_signal = nullptr;
-    GpiCbHdl *clk_toggle_cb_hdl = nullptr;
+    gpi_hdl clk_toggle_cb_hdl = gpi_nil_hdl;
 
     uint64_t period = 0;
     uint64_t t_high = 0;
@@ -873,7 +882,7 @@ class GpiClock {
 
 int GpiClock::start(uint64_t period_steps, uint64_t high_steps, bool start_high,
                     gpi_set_action set_action) {
-    if (clk_toggle_cb_hdl) {
+    if (!gpi_hdl_is_nil(clk_toggle_cb_hdl)) {
         return EBUSY;
     }
     if ((period_steps < 2) || (high_steps < 1) ||
@@ -890,11 +899,11 @@ int GpiClock::start(uint64_t period_steps, uint64_t high_steps, bool start_high,
 }
 
 int GpiClock::stop() {
-    if (!clk_toggle_cb_hdl) {
+    if (gpi_hdl_is_nil(clk_toggle_cb_hdl)) {
         return -1;
     }
     gpi_remove_cb(clk_toggle_cb_hdl);
-    clk_toggle_cb_hdl = nullptr;
+    clk_toggle_cb_hdl = gpi_nil_hdl;
     return 0;
 }
 
@@ -908,7 +917,7 @@ int GpiClock::toggle(bool initialSet) {
 
     clk_toggle_cb_hdl =
         gpi_register_timed_callback(&GpiClock::toggle_cb, this, to_next_edge);
-    if (!clk_toggle_cb_hdl) {
+    if (gpi_hdl_is_nil(clk_toggle_cb_hdl)) {
         // LCOV_EXCL_START
         if (!initialSet) {
             // Failing when called from start() will be reported via
@@ -952,7 +961,7 @@ static PyObject *clock_create(PyObject *, PyObject *args) {
     GpiClock *gpi_clk = new GpiClock(sim_hdl);
 
     if (gpi_clk) {
-        return gpi_hdl_New(gpi_clk);
+        return gpi_hdl_New(gpi_clk, gpi_nil_hdl);
     } else {
         // LCOV_EXCL_START
         PyErr_SetString(PyExc_RuntimeError, "Failed to create clock!");
