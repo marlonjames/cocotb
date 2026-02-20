@@ -129,6 +129,7 @@ void gpi_finalize(void) {
         it->first(it->second);
         LOG_TRACE("User Finalize callback => [ GPI Finalize ]");
     }
+    gpi_callback_audit();
 }
 
 void gpi_check_cleanup(void) {
@@ -659,84 +660,138 @@ gpi_range_dir gpi_get_range_dir(gpi_sim_hdl obj_hdl) {
     return obj_hdl->get_range_dir();
 }
 
-gpi_cb_hdl gpi_register_value_change_callback(int (*gpi_function)(void *),
-                                              void *gpi_cb_data,
-                                              gpi_sim_hdl sig_hdl,
-                                              gpi_edge edge) {
+gpi_hdl gpi_register_value_change_callback(int (*gpi_function)(void *),
+                                           void *gpi_cb_data,
+                                           gpi_sim_hdl sig_hdl, gpi_edge edge) {
     GpiSignalObjHdl *signal_hdl = static_cast<GpiSignalObjHdl *>(sig_hdl);
 
     /* Do something based on int & GPI_RISING | GPI_FALLING */
-    GpiCbHdl *cb_hdl = signal_hdl->register_value_change_callback(
+    gpi_hdl cb_hdl = signal_hdl->register_value_change_callback(
         edge, gpi_function, gpi_cb_data);
-    if (!cb_hdl) {
-        LOG_ERROR("Failed to register a value change callback");
-        return NULL;
-    } else {
-        return cb_hdl;
+
+    if (gpi_hdl_is_nil(cb_hdl)) {
+        LOG_ERROR("Failed to register a valuechange callback");
     }
+    return cb_hdl;
 }
 
-gpi_cb_hdl gpi_register_timed_callback(int (*gpi_function)(void *),
-                                       void *gpi_cb_data, uint64_t time) {
+gpi_hdl gpi_register_timed_callback(int (*gpi_function)(void *),
+                                    void *gpi_cb_data, uint64_t time) {
     // It should not matter which implementation we use for this so just pick
     // the first one
-    GpiCbHdl *cb_hdl = registered_impls[0]->register_timed_callback(
+    gpi_hdl hdl = registered_impls[0]->register_timed_callback(
         time, gpi_function, gpi_cb_data);
-    if (!cb_hdl) {
+    if (gpi_hdl_is_nil(hdl)) {
         LOG_ERROR("Failed to register a timed callback");
-        return NULL;
-    } else {
-        return cb_hdl;
     }
+    return hdl;
 }
 
-gpi_cb_hdl gpi_register_readonly_callback(int (*gpi_function)(void *),
-                                          void *gpi_cb_data) {
+gpi_hdl gpi_register_readonly_callback(int (*gpi_function)(void *),
+                                       void *gpi_cb_data) {
     // It should not matter which implementation we use for this so just pick
     // the first one
-    GpiCbHdl *cb_hdl = registered_impls[0]->register_readonly_callback(
-        gpi_function, gpi_cb_data);
-    if (!cb_hdl) {
+    gpi_hdl hdl = registered_impls[0]->register_readonly_callback(gpi_function,
+                                                                  gpi_cb_data);
+    if (gpi_hdl_is_nil(hdl)) {
         LOG_ERROR("Failed to register a readonly callback");
-        return NULL;
-    } else {
-        return cb_hdl;
     }
+
+    return hdl;
 }
 
-gpi_cb_hdl gpi_register_nexttime_callback(int (*gpi_function)(void *),
-                                          void *gpi_cb_data) {
+gpi_hdl gpi_register_nexttime_callback(int (*gpi_function)(void *),
+                                       void *gpi_cb_data) {
     // It should not matter which implementation we use for this so just pick
     // the first one
-    GpiCbHdl *cb_hdl = registered_impls[0]->register_nexttime_callback(
-        gpi_function, gpi_cb_data);
-    if (!cb_hdl) {
+    gpi_hdl hdl = registered_impls[0]->register_nexttime_callback(gpi_function,
+                                                                  gpi_cb_data);
+    if (gpi_hdl_is_nil(hdl)) {
         LOG_ERROR("Failed to register a nexttime callback");
-        return NULL;
-    } else {
-        return cb_hdl;
     }
+
+    return hdl;
 }
 
-gpi_cb_hdl gpi_register_readwrite_callback(int (*gpi_function)(void *),
-                                           void *gpi_cb_data) {
+gpi_hdl gpi_register_readwrite_callback(int (*gpi_function)(void *),
+                                        void *gpi_cb_data) {
     // It should not matter which implementation we use for this so just pick
     // the first one
-    GpiCbHdl *cb_hdl = registered_impls[0]->register_readwrite_callback(
-        gpi_function, gpi_cb_data);
-    if (!cb_hdl) {
+    gpi_hdl hdl = registered_impls[0]->register_readwrite_callback(gpi_function,
+                                                                   gpi_cb_data);
+    if (gpi_hdl_is_nil(hdl)) {
         LOG_ERROR("Failed to register a readwrite callback");
-        return NULL;
-    } else {
-        return cb_hdl;
     }
+
+    return hdl;
 }
 
-int gpi_remove_cb(gpi_cb_hdl cb_hdl) { return cb_hdl->remove(); }
+int gpi_remove_cb(gpi_hdl cb_hdl) {
+    gpi_callback *cb = gpi_callback_from_index(cb_hdl.index);
 
-void gpi_get_cb_info(gpi_cb_hdl cb_hdl, int (**cb_func)(void *),
-                     void **cb_data) {
-    cb_hdl->get_cb_info(cb_func, cb_data);
+    int error = (!cb);
+
+    if (error) {
+        LOG_ERROR("Attempting remove callback at invalid index %d",
+                  cb_hdl.index);
+    } else if (cb->meta & META_VALID) {
+        uint32_t hdl_gen = cb_hdl.meta & META_GEN;
+        uint32_t cb_gen = cb->meta & META_GEN;
+        if (cb_gen != hdl_gen) {
+            LOG_ERROR(
+                "Attempting to remove callback using out-of-date or invalid "
+                "handle. Handle generation: %d, callback generation: %d",
+                hdl_gen, cb_gen);
+            error = 1;
+        } else {
+            error = cb->impl->remove_callback(cb);
+            if (error) {
+                LOG_ERROR(
+                    "Error removing callback using handle "
+                    "{index: %d, meta: %u}",
+                    cb_hdl.index, cb_hdl.meta);
+            }
+        }
+    }
+    // else callback is already removed and released
+
+    return error;
+}
+
+int gpi_get_cb_info(gpi_hdl cb_hdl, int (**cb_func)(void *), void **cb_data) {
+    gpi_callback *cb = gpi_callback_from_index(cb_hdl.index);
+
+    int error = (!cb);
+
+    if (error) {
+        LOG_ERROR(
+            "Attempting to get callback info for an invalid callback index %d",
+            cb_hdl.index);
+    } else {
+        error = 1;
+        if (cb->meta & META_VALID) {
+            uint32_t hdl_gen = cb_hdl.meta & META_GEN;
+            uint32_t cb_gen = cb->meta & META_GEN;
+            if (cb_gen != hdl_gen) {
+                LOG_ERROR(
+                    "Attempting to get callback info using out-of-date or "
+                    "invalid handle. "
+                    "Handle generation: %d, callback generation: %d",
+                    hdl_gen, cb_gen);
+            } else {
+                error = 0;
+                if (cb_func) {
+                    *cb_func = cb->user_cb_func;
+                }
+                if (cb_data) {
+                    *cb_data = cb->user_cb_data;
+                }
+            }
+        }
+        // else callback is released and handle is invalid
+    }
+
+    return error;
 }
 
 const char *GpiImplInterface::get_name_c() { return m_name.c_str(); }

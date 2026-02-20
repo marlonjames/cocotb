@@ -72,7 +72,13 @@ struct GpiIterator;
 /** Handle to simulation object, such as a signal. */
 typedef struct GpiObjHdl *gpi_sim_hdl;
 
-/** Handle to callback object. */
+/** Deprecated handle to callback object.
+ *
+ * \verbatim embed:rst:leading-asterisk
+ *     .. deprecated:: 2.1
+ *         See :cpp:struct:`gpi_hdl` for handles to callbacks.
+ * \endverbatim
+ */
 typedef struct GpiCbHdl *gpi_cb_hdl;
 
 /** Handle to iterator object.
@@ -80,11 +86,60 @@ typedef struct GpiCbHdl *gpi_cb_hdl;
  * Used to iterate over child handles of a smulation object.
  */
 typedef struct GpiIterator *gpi_iterator_hdl;
+
+typedef struct gpi_hdl gpi_hdl;
 #endif
+
+/** GPI handle.
+ *
+ * This type is provided to GPI users to identify an object
+ * that is managed by the GPI.
+ *
+ * Users should provide this handle to GPI functions where appropriate.
+ *
+ * \verbatim embed:rst:leading-asterisk
+ *     .. note::
+ *         These handles are simple structs and can be copied around
+ *         by user code without problems.
+ * \endverbatim
+ *
+ */
+struct gpi_hdl {
+    int32_t index;
+    uint32_t meta;
+};
+
+/** Nil handle definition.
+ *
+ * Where a @ref gpi_hdl is returned from a GPI function,
+ * if there was a problem, a nil handle is returned.
+ *
+ * This is equivalent to a `NULL` pointer,
+ * but can be safely passed to GPI functions,
+ * which will detect a nil handle.
+ *
+ * This is intended to be used when initializing a gpi_hdl.
+ */
+// clang-format off
+#ifdef __cplusplus
+#define gpi_nil_hdl {}
+#else
+#define gpi_nil_hdl {0}
+#endif
+// clang-format on
 
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+/** Check whether the provided @ref gpi_hdl is a nil handle.
+ *
+ * @param hdl   Handle to check.
+ * @return      `1` if nil, `0` if non-nil.
+ */
+static inline int gpi_hdl_is_nil(gpi_hdl hdl) {
+    return (hdl.index == 0 && hdl.meta == 0);
+}
 
 /** @defgroup SimIntf Simulator Control and Interrogation
  * These functions are for controlling and querying
@@ -408,9 +463,9 @@ typedef enum gpi_edge_e {
  * @param time          Time delay in simulation time units.
  * @return              Handle to callback object.
  */
-GPI_EXPORT gpi_cb_hdl gpi_register_timed_callback(int (*gpi_function)(void *),
-                                                  void *gpi_cb_data,
-                                                  uint64_t time);
+GPI_EXPORT gpi_hdl gpi_register_timed_callback(int (*gpi_function)(void *),
+                                               void *gpi_cb_data,
+                                               uint64_t time);
 
 /** Register a value change callback.
  *
@@ -420,7 +475,7 @@ GPI_EXPORT gpi_cb_hdl gpi_register_timed_callback(int (*gpi_function)(void *),
  * @param edge          Type of value change to monitor for.
  * @return              Handle to callback object.
  */
-GPI_EXPORT gpi_cb_hdl gpi_register_value_change_callback(
+GPI_EXPORT gpi_hdl gpi_register_value_change_callback(
     int (*gpi_function)(void *), void *gpi_cb_data, gpi_sim_hdl sig_hdl,
     gpi_edge edge);
 
@@ -431,8 +486,8 @@ GPI_EXPORT gpi_cb_hdl gpi_register_value_change_callback(
  * @param gpi_cb_data   Pointer to user data to be passed to callback function.
  * @return              Handle to callback object.
  */
-GPI_EXPORT gpi_cb_hdl
-gpi_register_readonly_callback(int (*gpi_function)(void *), void *gpi_cb_data);
+GPI_EXPORT gpi_hdl gpi_register_readonly_callback(int (*gpi_function)(void *),
+                                                  void *gpi_cb_data);
 
 /** Register a next timestep simulation phase callback.
  *
@@ -441,8 +496,8 @@ gpi_register_readonly_callback(int (*gpi_function)(void *), void *gpi_cb_data);
  * @param gpi_cb_data   Pointer to user data to be passed to callback function.
  * @return              Handle to callback object.
  */
-GPI_EXPORT gpi_cb_hdl
-gpi_register_nexttime_callback(int (*gpi_function)(void *), void *gpi_cb_data);
+GPI_EXPORT gpi_hdl gpi_register_nexttime_callback(int (*gpi_function)(void *),
+                                                  void *gpi_cb_data);
 
 /** Register a readwrite simulation phase callback.
  *
@@ -451,8 +506,8 @@ gpi_register_nexttime_callback(int (*gpi_function)(void *), void *gpi_cb_data);
  * @param gpi_cb_data   Pointer to user data to be passed to callback function.
  * @return              Handle to callback object.
  */
-GPI_EXPORT gpi_cb_hdl
-gpi_register_readwrite_callback(int (*gpi_function)(void *), void *gpi_cb_data);
+GPI_EXPORT gpi_hdl gpi_register_readwrite_callback(int (*gpi_function)(void *),
+                                                   void *gpi_cb_data);
 
 /** Register a callback to run at the start of simulation time.
  *
@@ -495,18 +550,19 @@ GPI_EXPORT int gpi_register_finalize_callback(gpi_finalize_callback cb,
  * @param cb_hdl    The handle to the callback to remove.
  * @return          `0` on successful removal, `1` otherwise.
  */
-GPI_EXPORT int gpi_remove_cb(gpi_cb_hdl cb_hdl);
+GPI_EXPORT int gpi_remove_cb(gpi_hdl cb_hdl);
 
 /** Retrieve user callback information from callback handle.
- *
- * This function cannot fail.
  *
  * @param cb_hdl    The handle to the callback.
  * @param cb_func   Where the user callback function should be placed.
  * @param cb_data   Where the user callback function data should be placed.
+ * @return          `0` if handle is valid, `1` if not valid.
+ *                  If any pointer passed in is `NULL`, but handle is valid,
+ *                  `0` is still returned.
  */
-GPI_EXPORT void gpi_get_cb_info(gpi_cb_hdl cb_hdl, int (**cb_func)(void *),
-                                void **cb_data);
+GPI_EXPORT int gpi_get_cb_info(gpi_hdl cb_hdl, int (**cb_func)(void *),
+                               void **cb_data);
 
 /** @} */  // End of group SimCallbacks
 

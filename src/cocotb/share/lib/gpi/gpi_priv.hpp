@@ -19,10 +19,73 @@
 #define GPI_EXPORT COCOTB_IMPORT
 #endif
 
+// Callback kind
+// Bottom byte is basic kind
+// Upper bits are for flags
+typedef uint16_t cb_kind;
+enum cb_kind_ : uint16_t {
+    CB_TIMED,
+    CB_VALUE_CHANGE,
+    CB_READONLY,
+    CB_NEXT_TIMESTEP,
+    CB_READWRITE,
+    CB_STARTUP,
+    CB_SHUTDOWN,
+
+    CB_PARENT = 1 << 8,
+};
+
+#define CB_BASIC_KIND 0xFF
+
+GPI_EXPORT const char *cb_kind_to_string(cb_kind kind);
+
+// handle/object metadata
+// Bit 0 is valid bit for tracking if callback object is acquired or released
+// The rest are generation for handle validity
+typedef uint32_t meta32;
+#define GEN_INCR (1 << 1)
+#define META_GEN 0xFFFFFFFE
+#define META_VALID 0x1U
+
 class GpiCbHdl;
 class GpiImplInterface;
 class GpiIterator;
-class GpiCbHdl;
+class GpiSignalObjHdl;
+
+struct gpi_callback {
+    // Callback kind
+    cb_kind kind;
+
+    // Removed (valid callback but not to be processed / called)
+    bool removed;
+
+    // Metadata (generation, validity)
+    meta32 meta;
+
+    // GPI implementation
+    GpiImplInterface *impl;
+
+    // Simulator callback object handle
+    // Null when this is a child callback
+    void *sim_cb_hdl;
+
+    // Pointers to manage parent and child (user) callbacks
+    gpi_callback *parent;
+    gpi_callback *next;
+    gpi_callback *prev;
+    gpi_callback *last;
+
+    // User callback
+    int32_t (*user_cb_func)(void *);
+    void *user_cb_data;
+
+    // ValueChange callbacks
+    GpiSignalObjHdl *signal;
+    gpi_edge edge;
+
+    // Index in the callback pool
+    int32_t index;
+};
 
 /* Base GPI class others are derived from */
 class GPI_EXPORT GpiHdl {
@@ -131,69 +194,21 @@ class GPI_EXPORT GpiSignalObjHdl : public GpiObjHdl {
                                      gpi_set_action action) = 0;
     virtual int set_signal_value_binstr(std::string &value,
                                         gpi_set_action action) = 0;
-    // virtual GpiCbHdl monitor_value(bool rising_edge) = 0; this was for the
-    // triggers
-    // but the explicit ones are probably better
 
-    virtual GpiCbHdl *register_value_change_callback(
-        gpi_edge edge, int (*gpi_function)(void *), void *gpi_cb_data) = 0;
+    virtual gpi_hdl register_value_change_callback(gpi_edge edge,
+                                                   int (*gpi_function)(void *),
+                                                   void *gpi_cb_data) = 0;
+
+    // Value change callback is associated with sim callback object.
+    gpi_callback *m_valuechange_cb = nullptr;
 };
 
-/* GPI Callback handle */
-// To set a callback it needs the signal to do this on,
-// vpiHandle/vhpiHandleT for instance. The
-class GPI_EXPORT GpiCbHdl : public GpiHdl {
-  public:
-    GpiCbHdl() = delete;
-    GpiCbHdl(GpiImplInterface *impl) : GpiHdl(impl) {}
-
-    // TODO Some of these routines don't need to be declared here. Only remove()
-    // and get_cb_info() need to. In fact, declaring these here means we can't
-    // do things like pass arguments to arm().
-
-    /** Set user callback info
-     *
-     * Not on init to prevent having to pass around the arguments everywhere.
-     * Secondary initialization routine. ONLY CALL ONCE!
-     */
-    void set_cb_info(int (*cb_func)(void *), void *cb_data) noexcept {
-        this->m_cb_func = cb_func;
-        this->m_cb_data = cb_data;
-    }
-
-    /** Get the current user callback function and data. */
-    void get_cb_info(int (**cb_func)(void *), void **cb_data) noexcept {
-        if (cb_func) {
-            *cb_func = m_cb_func;
-        }
-        if (cb_data) {
-            *cb_data = m_cb_data;
-        }
-    }
-
-    /** Arm the callback after construction.
-     *
-     * Calling virtual functions from constructors does not work as expected.
-     * Secondary initialization routine. ONLY CALL ONCE!
-     */
-    virtual int arm() = 0;
-
-    /** Remove the callback before it fires.
-     *
-     * This function should delete the object.
-     */
-    virtual int remove() = 0;
-
-    /** Run the callback.
-     *
-     * This function should delete the object if it can't fire again.
-     */
-    virtual int run() = 0;
-
-  protected:
-    int (*m_cb_func)(void *);  // GPI function to callback
-    void *m_cb_data;           // GPI data supplied to "m_cb_func"
-};
+// Obsolete GPI callback handle
+//
+// This is kept around for now, as PyGPI uses a shared Python object type
+// that is templated on a GPI pointer type,
+// one of which is a pointer to this type.
+class GPI_EXPORT GpiCbHdl {};
 
 class GPI_EXPORT GpiIterator : public GpiHdl {
   public:
@@ -247,22 +262,27 @@ class GPI_EXPORT GpiImplInterface {
                                         gpi_iterator_sel type) = 0;
 
     /* Callback related, these may (will) return the same handle */
-    virtual GpiCbHdl *register_timed_callback(uint64_t time,
-                                              int (*gpi_function)(void *),
-                                              void *gpi_cb_data) = 0;
-    virtual GpiCbHdl *register_readonly_callback(int (*gpi_function)(void *),
-                                                 void *gpi_cb_data) = 0;
-    virtual GpiCbHdl *register_nexttime_callback(int (*gpi_function)(void *),
-                                                 void *gpi_cb_data) = 0;
-    virtual GpiCbHdl *register_readwrite_callback(int (*gpi_function)(void *),
-                                                  void *gpi_cb_data) = 0;
+    virtual gpi_hdl register_timed_callback(uint64_t time,
+                                            int (*gpi_function)(void *),
+                                            void *gpi_cb_data) = 0;
+    virtual gpi_hdl register_readonly_callback(int (*gpi_function)(void *),
+                                               void *gpi_cb_data) = 0;
+    virtual gpi_hdl register_nexttime_callback(int (*gpi_function)(void *),
+                                               void *gpi_cb_data) = 0;
+    virtual gpi_hdl register_readwrite_callback(int (*gpi_function)(void *),
+                                                void *gpi_cb_data) = 0;
+    virtual int remove_callback(gpi_callback *cb) = 0;
 
   private:
     std::string m_name;
 };
 
-/* Called from implementation layers back up the stack */
-GPI_EXPORT int gpi_register_impl(GpiImplInterface *func_tbl);
+/** Register a GPI implementation.
+ *
+ * @param new_impl  Implementation to register.
+ * @return          0 on success, -1 on failure.
+ */
+GPI_EXPORT int gpi_register_impl(GpiImplInterface *new_impl);
 
 // GpiImpls are currently expected to register single callbacks with the
 // interface for the start and end of simulation time. These functions are
@@ -270,26 +290,77 @@ GPI_EXPORT int gpi_register_impl(GpiImplInterface *func_tbl);
 GPI_EXPORT void gpi_start_of_sim_time();
 GPI_EXPORT void gpi_end_of_sim_time();
 
+/** Acquire callback from the object pool, allocating if necessary.
+ *
+ * @return A callback object that is marked as valid.
+ */
+GPI_EXPORT gpi_callback *gpi_callback_acquire();
+
+/** Release a callback to the object pool.
+ *
+ * The released callback will have its metadata updated
+ * to be a different generation and be marked as invalid.
+ *
+ * @param cb Callback object to be released.
+ */
+GPI_EXPORT void gpi_callback_release(gpi_callback *cb);
+
+/** Get a stable pointer from the index in the object pool.
+ *
+ * @param index  Index in the object pool.
+ * @return       Stable callback pointer if index is in the pool, `NULL`
+ *               otherwise.
+ */
+GPI_EXPORT gpi_callback *gpi_callback_from_index(int32_t index);
+
+/** Cleanup value change callbacks.
+ * This should be called before returning from each simulation callback.
+ */
+GPI_EXPORT void gpi_cleanup_valuechange_cbs();
+
+/** Mark value change callback for cleanup. */
+GPI_EXPORT void gpi_mark_valuechange_for_cleanup(gpi_callback *cb);
+
+/** Audit callback pool to check for acquired and not released callbacks. */
+void gpi_callback_audit();
+
+/** Common GPI entry point, called from first implementation after it registers
+ * itself. */
 GPI_EXPORT void gpi_entry_point();
+
+/** Check for cleanup and finalize before returning to simulator. */
 GPI_EXPORT void gpi_check_cleanup();
+
+/** Init GPI logging and debug */
 GPI_EXPORT void gpi_init_logging_and_debug();
 
+/** Shared library support - open library */
 void *utils_dyn_open(const char *lib_name);
+
+/** Shared library support - get exported symbol */
 void *utils_dyn_sym(void *handle, const char *sym_name);
 
-#define GPI_TO_USER_CB(impl) LOG_TRACE("[ " xstr(impl) " ] => User Callback")
+/** Common handler for value change callbacks */
+GPI_EXPORT int32_t handle_value_change_callback(gpi_callback *parent_cb);
 
-#define USER_CB_TO_GPI(impl) LOG_TRACE("User Callback => [ " xstr(impl) " ]")
+/* Trace log helpers */
 
-#define SIM_TO_GPI(impl, cb_reason) \
-    LOG_TRACE("Sim => [ " xstr(impl) " for %s ]", cb_reason)
+#define GPI_TO_USER_CB(impl_str) \
+    LOG_TRACE("[ %s ] => User Callback", (const char *)impl_str)
 
-#define GPI_TO_SIM(impl)                        \
-    do {                                        \
-        gpi_check_cleanup();                    \
-        LOG_TRACE("[ " xstr(impl) " ] => Sim"); \
+#define USER_CB_TO_GPI(impl_str) \
+    LOG_TRACE("User Callback => [ %s ]", (const char *)impl_str)
+
+#define SIM_TO_GPI(impl_str, cb_reason) \
+    LOG_TRACE("Sim => [ %s for %s ]", (const char *)impl_str, cb_reason)
+
+#define GPI_TO_SIM(impl_str)                                \
+    do {                                                    \
+        gpi_check_cleanup();                                \
+        LOG_TRACE("[ %s ] => Sim", (const char *)impl_str); \
     } while (0)
 
+/* Implementation entry points for use with GPI_EXTRA */
 typedef void (*layer_entry_func)();
 
 /* Use this macro in an implementation layer to define an entry point */

@@ -80,101 +80,6 @@ static inline void __check_vhpi_error(const char *file, const char *func,
         __check_vhpi_error(__FILE__, __func__, __LINE__); \
     } while (0)
 
-class VhpiCbHdl : public GpiCbHdl {
-  public:
-    VhpiCbHdl(GpiImplInterface *impl);
-
-    int arm() override;
-    int remove() override;
-    int run() override;
-
-  protected:
-    vhpiCbDataT cb_data;
-    vhpiTimeT vhpi_time;
-    bool m_removed = false;
-};
-
-class VhpiSignalObjHdl;
-
-class VhpiValueCbHdl : public VhpiCbHdl {
-  public:
-    VhpiValueCbHdl(GpiImplInterface *impl, VhpiSignalObjHdl *sig,
-                   gpi_edge edge);
-    int run() override;
-
-  private:
-    GpiSignalObjHdl *m_signal;
-    gpi_edge m_edge;
-};
-
-class VhpiTimedCbHdl : public VhpiCbHdl {
-  public:
-    VhpiTimedCbHdl(GpiImplInterface *impl, uint64_t time);
-};
-
-class VhpiReadOnlyCbHdl : public VhpiCbHdl {
-  public:
-    VhpiReadOnlyCbHdl(GpiImplInterface *impl);
-};
-
-class VhpiNextPhaseCbHdl : public VhpiCbHdl {
-  public:
-    VhpiNextPhaseCbHdl(GpiImplInterface *impl);
-};
-
-class VhpiStartupCbHdl : public VhpiCbHdl {
-  public:
-    VhpiStartupCbHdl(GpiImplInterface *impl);
-
-    // Too many sims get upset trying to remove startup callbacks so we just
-    // don't try. TODO Is this still accurate?
-
-    int run() override {
-        int res = 0;
-        if (!m_removed) {
-            res = m_cb_func(m_cb_data);
-        } else {
-            LOG_TRACE("[ VHPI (startup) ] callback is removed");
-        }
-        delete this;
-        return res;
-    }
-
-    int remove() override {
-        m_removed = true;
-        return 0;
-    }
-};
-
-class VhpiShutdownCbHdl : public VhpiCbHdl {
-  public:
-    VhpiShutdownCbHdl(GpiImplInterface *impl);
-
-    // Too many sims get upset trying to remove startup callbacks so we just
-    // don't try. TODO Is this still accurate?
-
-    int run() override {
-        int res = 0;
-        if (!m_removed) {
-            res = m_cb_func(m_cb_data);
-        } else {
-            LOG_TRACE("[ VHPI (shutdown) ] callback is removed");
-        }
-        delete this;
-        return res;
-    }
-
-    int remove() override {
-        m_removed = true;
-        return 0;
-    }
-};
-
-class VhpiReadWriteCbHdl : public VhpiCbHdl {
-  public:
-    VhpiReadWriteCbHdl(GpiImplInterface *impl);
-};
-
 class VhpiArrayObjHdl : public GpiObjHdl {
   public:
     VhpiArrayObjHdl(GpiImplInterface *impl, vhpiHandleT hdl,
@@ -218,12 +123,11 @@ class VhpiSignalObjHdl : public GpiSignalObjHdl {
     int set_signal_value_binstr(std::string &value,
                                 gpi_set_action action) override;
 
-    /* Value change callback accessor */
     int initialise(const std::string &name,
                    const std::string &fq_name) override;
-    GpiCbHdl *register_value_change_callback(gpi_edge edge,
-                                             int (*function)(void *),
-                                             void *cb_data) override;
+    gpi_hdl register_value_change_callback(gpi_edge edge,
+                                           int (*function)(void *),
+                                           void *cb_data) override;
 
   protected:
     vhpiEnumT chr2vhpi(char value);
@@ -281,15 +185,23 @@ class VhpiImpl : public GpiImplInterface {
     GpiIterator *iterate_handle(GpiObjHdl *obj_hdl,
                                 gpi_iterator_sel type) override;
 
-    /* Callback related, these may (will) return the same handle*/
-    GpiCbHdl *register_timed_callback(uint64_t time, int (*function)(void *),
-                                      void *cb_data) override;
-    GpiCbHdl *register_readonly_callback(int (*function)(void *),
-                                         void *cb_data) override;
-    GpiCbHdl *register_nexttime_callback(int (*function)(void *),
-                                         void *cb_data) override;
-    GpiCbHdl *register_readwrite_callback(int (*function)(void *),
-                                          void *cb_data) override;
+    /* Callback related */
+
+    // Helper function to hold common functionality
+    gpi_hdl register_non_valuechange_callback(cb_kind kind, uint64_t time,
+                                              int (*cb_func)(void *),
+                                              void *cb_data);
+
+    gpi_hdl register_timed_callback(uint64_t time, int (*function)(void *),
+                                    void *cb_data) override;
+    gpi_hdl register_readonly_callback(int (*function)(void *),
+                                       void *cb_data) override;
+    gpi_hdl register_nexttime_callback(int (*function)(void *),
+                                       void *cb_data) override;
+    gpi_hdl register_readwrite_callback(int (*function)(void *),
+                                        void *cb_data) override;
+    int remove_callback(gpi_callback *cb) override;
+
     GpiObjHdl *get_child_by_name(const std::string &name,
                                  GpiObjHdl *parent) override;
     GpiObjHdl *get_child_by_index(int32_t index, GpiObjHdl *parent) override;
@@ -314,9 +226,10 @@ class VhpiImpl : public GpiImplInterface {
     void main() noexcept;
 
   private:
-    // We store the shutdown callback handle here so sim_end() can remove() it
-    // if it's called.
-    VhpiShutdownCbHdl *m_sim_finish_cb;
+    // We store the shutdown callback handle here so that if sim_end() is
+    // called, it can be removed.
+    gpi_callback *m_sim_finish_cb;
+
     std::string m_product;
     std::string m_version;
     int m_argc = 0;

@@ -17,27 +17,6 @@
 using std::abs;
 using std::to_string;
 
-GpiCbHdl *FliSignalObjHdl::register_value_change_callback(
-    gpi_edge edge, int (*cb_func)(void *), void *cb_data) {
-    if (m_is_var) {
-        return NULL;
-    }
-    // TODO The dynamic cast here is a good reason to not declare members in
-    // base classes.
-    auto &cache = dynamic_cast<FliImpl *>(m_impl)->m_value_change_cache;
-    auto cb = cache.acquire();
-    cb->set_signal_and_edge(this, edge);
-    auto err = cb->arm();
-    // LCOV_EXCL_START
-    if (err) {
-        cache.release(cb);
-        return NULL;
-    }
-    // LCOV_EXCL_STOP
-    cb->set_cb_info(cb_func, cb_data);
-    return cb;
-}
-
 int FliObjHdl::initialise(const std::string &name, const std::string &fq_name) {
     bool is_signal =
         (get_acc_type() == accSignal || get_acc_full_type() == accAliasSignal);
