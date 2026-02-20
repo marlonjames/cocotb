@@ -72,6 +72,10 @@ User Handles
 These types and functions are about handles the GPI provides to users
 for interacting with GPI-managed objects.
 
+.. doxygenstruct:: gpi_hdl
+.. doxygendefine:: gpi_nil_hdl
+.. doxygenfunction:: gpi_hdl_is_nil
+
 .. doxygentypedef:: gpi_sim_hdl
 .. doxygentypedef:: gpi_iterator_hdl
 .. doxygentypedef:: gpi_cb_hdl
