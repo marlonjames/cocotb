@@ -37,14 +37,6 @@ async def test_first_on_coincident_trigger(dut) -> None:
 
 
 @cocotb.xfail(
-    SIM_NAME.startswith("nvc"),
-    reason="NVC doesn't fire second RisingEdge trigger for dut.b when it is registered the same time step that a change occurred (gh-5112)",
-)
-@cocotb.xfail(
-    SIM_NAME.startswith("verilator"),
-    reason="Verilator doesn't fire second RisingEdge trigger for dut.b when it is registered the same time step that a change occurred (gh-5112)",
-)
-@cocotb.xfail(
     SIM_NAME.startswith("riviera"),
     reason="Riviera doesn't fire second RisingEdge trigger for dut.b when it is registered the same time step that a change occurred (gh-5112)",
 )
@@ -59,10 +51,6 @@ async def test_first_on_coincident_trigger(dut) -> None:
 @cocotb.skipif(
     SIM_NAME.startswith("modelsim") and LANGUAGE in ["vhdl"] and VHDL_INTF in ["fli"],
     reason="Questa will segfault",
-)
-@cocotb.xfail(
-    SIM_NAME.startswith("ghdl"),
-    reason="GHDL doesn't fire second RisingEdge trigger for dut.b when it is registered the same time step that a change occurred (gh-5112)",
 )
 # Setting timeout because even though GHDL fails the test correctly, it gets stuck and doesn't finish simulation (gh-4997)
 @cocotb.test(timeout_time=100, timeout_unit="ns")

@@ -18,7 +18,8 @@
 #include "_vendor/tcl/tcl.h"
 
 void FliImpl::sim_end() {
-    m_sim_finish_cb->remove();
+    remove_callback(m_sim_finish_cb);
+
     if (mti_NowUpper() == 0 && mti_Now() == 0 && mti_Delta() == 0) {
         mti_Quit();
     } else {
@@ -398,7 +399,7 @@ GpiObjHdl *FliImpl::get_child_by_index(int32_t index, GpiObjHdl *parent) {
                obj_type == GPI_ARRAY || obj_type == GPI_STRING) {
         FliValueObjHdl *fli_obj = reinterpret_cast<FliValueObjHdl *>(parent);
 
-        LOG_DEBUG("Looking for index %u from %s", index,
+        LOG_DEBUG("Looking for index %d from %s", index,
                   parent->get_name_str());
 
         if ((hdl = fli_obj->get_sub_hdl(index)) == NULL) {
@@ -590,65 +591,6 @@ error:
                   mti_GetRegionName(root));
     }
     return NULL;
-}
-
-GpiCbHdl *FliImpl::register_timed_callback(uint64_t time,
-                                           int (*cb_func)(void *),
-                                           void *cb_data) {
-    // get timer from cache
-    auto cb_hdl = m_timer_cache.acquire();
-    cb_hdl->set_time(time);
-    int err = cb_hdl->arm();
-    // LCOV_EXCL_START
-    if (err) {
-        m_timer_cache.release(cb_hdl);
-        return NULL;
-    }
-    // LCOV_EXCL_STOP
-    cb_hdl->set_cb_info(cb_func, cb_data);
-    return cb_hdl;
-}
-
-GpiCbHdl *FliImpl::register_readonly_callback(int (*cb_func)(void *),
-                                              void *cb_data) {
-    auto cb_hdl = m_read_only_cache.acquire();
-    int err = cb_hdl->arm();
-    // LCOV_EXCL_START
-    if (err) {
-        m_read_only_cache.release(cb_hdl);
-        return NULL;
-    }
-    // LCOV_EXCL_STOP
-    cb_hdl->set_cb_info(cb_func, cb_data);
-    return cb_hdl;
-}
-
-GpiCbHdl *FliImpl::register_readwrite_callback(int (*cb_func)(void *),
-                                               void *cb_data) {
-    auto cb_hdl = m_read_write_cache.acquire();
-    int err = cb_hdl->arm();
-    // LCOV_EXCL_START
-    if (err) {
-        m_read_write_cache.release(cb_hdl);
-        return NULL;
-    }
-    // LCOV_EXCL_STOP
-    cb_hdl->set_cb_info(cb_func, cb_data);
-    return cb_hdl;
-}
-
-GpiCbHdl *FliImpl::register_nexttime_callback(int (*cb_func)(void *),
-                                              void *cb_data) {
-    auto cb_hdl = m_next_phase_cache.acquire();
-    int err = cb_hdl->arm();
-    // LCOV_EXCL_START
-    if (err) {
-        m_next_phase_cache.release(cb_hdl);
-        return NULL;
-    }
-    // LCOV_EXCL_STOP
-    cb_hdl->set_cb_info(cb_func, cb_data);
-    return cb_hdl;
 }
 
 GpiIterator *FliImpl::iterate_handle(GpiObjHdl *obj_hdl,
@@ -1120,30 +1062,22 @@ static int shutdown_callback(void *) {
 }
 
 void FliImpl::main() noexcept {
-    auto startup_cb = new FliStartupCbHdl(this);
-    auto err = startup_cb->arm();
-    // LCOV_EXCL_START
-    if (err) {
-        LOG_CRITICAL(
-            "FLI: Unable to register startup callback! Simulation will end.");
-        delete startup_cb;
-        exit(1);
-    }
-    // LCOV_EXCL_STOP
-    startup_cb->set_cb_info(startup_callback, nullptr);
+    gpi_callback *startup_cb = gpi_callback_acquire();
 
-    auto shutdown_cb = new FliShutdownCbHdl(this);
-    err = shutdown_cb->arm();
-    // LCOV_EXCL_START
-    if (err) {
-        LOG_CRITICAL(
-            "FLI: Unable to register shutdown callback! Simulation will end.");
-        startup_cb->remove();
-        delete shutdown_cb;
-        exit(1);
-    }
-    // LCOV_EXCL_STOP
-    shutdown_cb->set_cb_info(shutdown_callback, nullptr);
+    mti_AddLoadDoneCB(handle_fli_callback, startup_cb);
+
+    startup_cb->impl = this;
+    startup_cb->user_cb_func = startup_callback;
+    startup_cb->kind = CB_STARTUP;
+
+    gpi_callback *shutdown_cb = gpi_callback_acquire();
+
+    mti_AddQuitCB(handle_fli_callback, shutdown_cb);
+
+    shutdown_cb->impl = this;
+    shutdown_cb->user_cb_func = shutdown_callback;
+    shutdown_cb->kind = CB_SHUTDOWN;
+
     m_sim_finish_cb = shutdown_cb;
 
     gpi_register_impl(this);

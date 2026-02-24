@@ -538,20 +538,6 @@ long VhpiSignalObjHdl::get_signal_value_long() {
     return static_cast<int32_t>(value.value.intg);
 }
 
-GpiCbHdl *VhpiSignalObjHdl::register_value_change_callback(
-    gpi_edge edge, int (*cb_func)(void *), void *cb_data) {
-    auto cb_hdl = new VhpiValueCbHdl(m_impl, this, edge);
-    auto err = cb_hdl->arm();
-    // LCOV_EXCL_START
-    if (err) {
-        delete cb_hdl;
-        return NULL;
-    }
-    // LCOV_EXCL_STOP
-    cb_hdl->set_cb_info(cb_func, cb_data);
-    return cb_hdl;
-}
-
 int VhpiSignalObjHdl::get_signed() {
     if (m_type == GPI_INTEGER) {
         return 1;
